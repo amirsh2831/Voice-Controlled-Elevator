@@ -6,7 +6,7 @@ import csv
 import ast
 
 NEW_SAMPLE_PATH = "test_files"   
-DATASET_CSV = "dataset.csv"
+DATASET_CSV = "dataset_knn.csv"
 FRAME_SIZE = 1024
 HOP_SIZE = 512
 TARGET_FRAMES = 300  
@@ -37,9 +37,34 @@ def extract(filepath):
     emphasized[1:] = 1.7 * (data[1:] - 0.99 * data[:-1])
 
     num_frames = (len(emphasized) - FRAME_SIZE) // HOP_SIZE + 1
+
+     # ^ apply VAD to the signal
+    first_energies = []
+    for e in range(num_frames):
+        start = e * HOP_SIZE
+        end = start + FRAME_SIZE
+        frame = emphasized[start:end]
+
+        energy = np.sum(frame  ** 2)
+        first_energies.append(energy)
+    
+    normalized_energies = first_energies / max(first_energies)
+    w_start = 0
+    w_end = 0
+
+    for ws in range(num_frames): 
+        if (normalized_energies[ws] > 0.03): 
+            w_start = ws
+            break
+
+    for we in range(num_frames - 1, -1, -1): 
+        if (normalized_energies[we] > 0.03): 
+            w_end = we
+            break
+
     features = []
 
-    for i in range(num_frames):
+    for i in range(w_start, w_end+ 1):
         start = i * HOP_SIZE
         end = start + FRAME_SIZE
         frame = emphasized[start:end]
@@ -81,6 +106,15 @@ with open(DATASET_CSV, 'r') as f:
         combined = np.stack([avg, energy, zcr], axis=1)
         dataset.append((filename, combined))
 
+all_feat = np.stack([f for _, f in dataset])                    # (N, 300, 3)
+mean_feat = all_feat.mean(axis=(0,1), keepdims=True)
+std_feat = all_feat.std(axis=(0,1), keepdims=True) + 1e-8
+
+# Normalize all templates
+for i in range(len(dataset)):
+    name, feat = dataset[i]
+    dataset[i] = (name, (feat - mean_feat) / std_feat)
+
 confusion_matrix = np.zeros((10, 10), dtype=int)
 
 for test_file in os.listdir(NEW_SAMPLE_PATH):
@@ -95,6 +129,7 @@ for test_file in os.listdir(NEW_SAMPLE_PATH):
 
     features = extract(path)
     resized = resize(features, TARGET_FRAMES)
+    resized = (resized - mean_feat) / std_feat
 
     distances = []
     for filename, sample_feat in dataset:
@@ -103,12 +138,11 @@ for test_file in os.listdir(NEW_SAMPLE_PATH):
 
     distances.sort(key=lambda x: x[1])
     
-    # Get predicted label from reference filename like "03.wav"
-    predicted_label_str = distances[0][0].split('.')[0]  # "03" → "3"
+    predicted_label_str = distances[0][0].split('.')[0] 
     predicted_label = int(predicted_label_str)
-    predicted_label_index = predicted_label - 1  # again for 0-based indexing
+    predicted_label_index = predicted_label - 1 
     
-    # add data to confussion
+    # ^ add data to confusion
     confusion_matrix[test_label_index][predicted_label_index] += 1
 
     print(f"Test: {test_file} | Actual: {test_label} | Predicted: {predicted_label}")

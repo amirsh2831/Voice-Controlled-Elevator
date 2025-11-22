@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import csv
 import ast
 
-NEW_SAMPLE_PATH = "04-test.wav"   
+NEW_SAMPLE_PATH = "test_files/1-10.wav"   
 DATASET_CSV = "dataset_knn.csv"
 FRAME_SIZE = 1024
 HOP_SIZE = 512
@@ -36,9 +36,34 @@ def extract(filepath):
     emphasized[1:] = 1.7 * (data[1:] - 0.99 * data[:-1])
 
     num_frames = (len(emphasized) - FRAME_SIZE) // HOP_SIZE + 1
+
+ # ^ apply VAD to the signal
+    first_energies = []
+    for e in range(num_frames):
+        start = e * HOP_SIZE
+        end = start + FRAME_SIZE
+        frame = emphasized[start:end]
+
+        energy = np.sum(frame  ** 2)
+        first_energies.append(energy)
+    
+    normalized_energies = first_energies / max(first_energies)
+    w_start = 0
+    w_end = 0
+
+    for ws in range(num_frames): 
+        if (normalized_energies[ws] > 0.03): 
+            w_start = ws
+            break
+
+    for we in range(num_frames - 1, -1, -1): 
+        if (normalized_energies[we] > 0.03): 
+            w_end = we
+            break
+
     features = []
 
-    for i in range(num_frames):
+    for i in range(w_start, w_end + 1):
         start = i * HOP_SIZE
         end = start + FRAME_SIZE
         frame = emphasized[start:end]
@@ -48,13 +73,22 @@ def extract(filepath):
 
         avg = np.mean(frame)
         energy = np.sum(frame ** 2)
-        signs = np.sign(frame)
-        signs = signs[signs != 0]
+        zcr = 0
 
-        if len(signs) > 1:
-            zcr = np.mean(np.abs(np.diff(signs)))
-        else:
-            zcr = 0
+        for a in range(1, len(frame)):
+            if (frame[a] * frame[a-1] < 0): 
+                zcr += 1
+            elif (frame[a] * frame[a-1] == 0):
+                if (frame[a] * frame[a-2] < 0):
+                    zcr += 1
+
+        # signs = np.sign(frame)
+        # signs = signs[signs != 0]
+
+        # if len(signs) > 1:
+        #     zcr = np.mean(np.abs(np.diff(signs)))
+        # else:
+        #     zcr = 0
 
         features.append([avg, energy, zcr])
 
@@ -71,15 +105,27 @@ with open(DATASET_CSV, 'r') as f:
         combined = np.stack([avg, energy, zcr], axis=1)
         dataset.append((filename, combined))
 
+all_feat = np.stack([f for _, f in dataset])           # shape (N, 300, 3)
+mean_feat = all_feat.mean(axis=(0,1), keepdims=True)
+std_feat  = all_feat.std(axis=(0,1), keepdims=True) + 1e-8
+
+for i in range(len(dataset)):
+    name, feat = dataset[i]
+    dataset[i] = (name, (feat - mean_feat) / std_feat)
+
+# ---- extract and normalize test sample ----
 features = extract(NEW_SAMPLE_PATH)
 features_resized = resize(features, TARGET_FRAMES)
+features_resized = (features_resized - mean_feat) / std_feat   # CHANGE 2
 
+# ---- calculate distances ----
 distances = []
-for filename, features in dataset:
-    dist = np.linalg.norm(features_resized - features)
+for filename, feat in dataset:
+    dist = np.linalg.norm(features_resized - feat)   # now fair comparison!
     distances.append((filename, dist))
 
-distances.sort(key=lambda x: x[0])
+# ---- CHANGE 3: sort by real distance, not by name! ----
+distances.sort(key=lambda x: x[1])       # this was the bug!
 
 print("\nSimilarity Ranking:")
 for fname, d in distances:

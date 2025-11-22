@@ -12,6 +12,7 @@ FRAME_SIZE = 1024
 HOP_SIZE = 512
 TARGET_FRAMES = 300  
 
+# ^ resize frames to out frame count
 def resize_frames(data: np.ndarray, target_frames: int) -> np.ndarray:
     original_frames, features = data.shape
     resized = np.zeros((target_frames, features))
@@ -30,16 +31,45 @@ def resize_frames(data: np.ndarray, target_frames: int) -> np.ndarray:
 
 def extract_features(filepath):
     sample_rate, data = wav.read(filepath)
+
     if len(data.shape) == 2:
         data = np.mean(data, axis=1)
 
+    # ^ pre epmphasized data for better result
     emphasized = np.copy(data)
     emphasized[1:] = 1.7 * (data[1:] - 0.99 * data[:-1])
 
     num_frames = (len(emphasized) - FRAME_SIZE) // HOP_SIZE + 1
+
+    # ^ apply VAD to the signal
+    first_energies = []
+    for e in range(num_frames):
+        start = e * HOP_SIZE
+        end = start + FRAME_SIZE
+        frame = emphasized[start:end]
+
+        energy = np.sum(frame  ** 2)
+        first_energies.append(energy)
+    
+    normalized_energies = first_energies / max(first_energies)
+    w_start = 0
+    w_end = 0
+
+    for ws in range(num_frames): 
+        if (normalized_energies[ws] > 0.03): 
+            w_start = ws
+            break
+
+    for we in range(num_frames - 1, -1, -1): 
+        if (normalized_energies[we] > 0.03): 
+            w_end = we
+            break
+
+    
     features = []
 
-    for i in range(num_frames):
+    # ^ extract features after VAD
+    for i in range(w_start, w_end + 1):
         start = i * HOP_SIZE
         end = start + FRAME_SIZE
         frame = emphasized[start:end]
@@ -56,14 +86,6 @@ def extract_features(filepath):
             elif (frame[a] * frame[a-1] == 0):
                 if (frame[a] * frame[a-2] < 0):
                     zcr += 1
-
-        # signs = np.sign(frame)
-        # signs = signs[signs != 0]
-
-        # if len(signs) > 1:
-        #     zcr = np.mean(np.abs(np.diff(signs)))
-        # else:
-        #     zcr = 0
 
         features.append([avg, energy, zcr])
 
