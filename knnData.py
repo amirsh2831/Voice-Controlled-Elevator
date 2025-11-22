@@ -1,14 +1,18 @@
 import os
 import numpy as np
 import scipy.io.wavfile as wav
+import matplotlib.pyplot as plt
 import csv
+import ast
 
-AUDIO_FOLDER = "dataset"  
-OUTPUT_CSV = "dataset.csv"
+# === CONFIG ===
+SAMPLEPATH = "traning_Samples/"   
+DATASET_CSV = "dataset_knn.csv"
 FRAME_SIZE = 1024
-OVERLAP = 512  
+HOP_SIZE = 512
+TARGET_FRAMES = 300  
 
-def resize(data, target_frames):
+def resize_frames(data: np.ndarray, target_frames: int) -> np.ndarray:
     original_frames, features = data.shape
     resized = np.zeros((target_frames, features))
     scale = (original_frames - 1) / (target_frames - 1)
@@ -24,8 +28,7 @@ def resize(data, target_frames):
     resized[-1] = data[-1]
     return resized
 
-def extract(filepath):
-
+def extract_features(filepath):
     sample_rate, data = wav.read(filepath)
     if len(data.shape) == 2:
         data = np.mean(data, axis=1)
@@ -33,11 +36,11 @@ def extract(filepath):
     emphasized = np.copy(data)
     emphasized[1:] = 1.7 * (data[1:] - 0.99 * data[:-1])
 
-    num_frames = (len(emphasized) - FRAME_SIZE) // OVERLAP + 1
+    num_frames = (len(emphasized) - FRAME_SIZE) // HOP_SIZE + 1
     features = []
 
     for i in range(num_frames):
-        start = i * OVERLAP
+        start = i * HOP_SIZE
         end = start + FRAME_SIZE
         frame = emphasized[start:end]
 
@@ -46,13 +49,21 @@ def extract(filepath):
 
         avg = np.mean(frame)
         energy = np.sum(frame ** 2)
-        signs = np.sign(frame)
-        signs = signs[signs != 0]
+        zcr = 0
+        for a in range(1, len(frame)):
+            if (frame[a] * frame[a-1] < 0): 
+                zcr += 1
+            elif (frame[a] * frame[a-1] == 0):
+                if (frame[a] * frame[a-2] < 0):
+                    zcr += 1
 
-        if len(signs) > 1:
-            zcr = np.mean(np.abs(np.diff(signs)))
-        else:
-            zcr = 0
+        # signs = np.sign(frame)
+        # signs = signs[signs != 0]
+
+        # if len(signs) > 1:
+        #     zcr = np.mean(np.abs(np.diff(signs)))
+        # else:
+        #     zcr = 0
 
         features.append([avg, energy, zcr])
 
@@ -61,40 +72,43 @@ def extract(filepath):
 all_features = []
 frame_lengths = []
 
-for filename in os.listdir(AUDIO_FOLDER):
+for filename in os.listdir(SAMPLEPATH):
     if filename.endswith('.wav'):
-        path = os.path.join(AUDIO_FOLDER, filename)
-        feats = extract(path)
+        path = os.path.join(SAMPLEPATH, filename)
+        feats = extract_features(path)
         all_features.append(feats)
         frame_lengths.append(feats.shape[0])
         print(f"loaded {filename} with {feats.shape[0]} frames")
 
-# avg_frames = int(round(sum(frame_lengths) / len(frame_lengths)))
-avg_frames = 300
-print(f"\naverage frame: {avg_frames}")
+
+
+filenames = [f for f in os.listdir(SAMPLEPATH) if f.endswith('.wav')]
 
 resized_features = []
-filenames = [f for f in os.listdir(AUDIO_FOLDER) if f.endswith('.wav')]
-
 for i, feat in enumerate(all_features):
-    resized = resize(feat, avg_frames)
+    resized = resize_frames(feat, TARGET_FRAMES)
 
     avg_list = resized[:, 0].tolist()
     energy_list = resized[:, 1].tolist()
     zcr_list = resized[:, 2].tolist()
-
+    filename = filenames[i].split("-")[0]
+    print("sample", filename)
     resized_features.append([
-        filenames[i],
+        filename,
         avg_list,
         energy_list,
         zcr_list,
-        avg_frames
+        TARGET_FRAMES
     ])
 
-    print(f"Resized sample {filenames[i]} to {avg_frames} frames")
-
-with open(OUTPUT_CSV, 'w', newline='') as f:
+    print(f"Resized sample {filenames[i]} to {TARGET_FRAMES} frames")
+    
+with open(DATASET_CSV, 'w', newline='') as f:
     writer = csv.writer(f)
     writer.writerow(['filename', 'average', 'energy', 'zcr', 'frame_count'])
+
     for row in resized_features:
         writer.writerow(row)
+
+
+

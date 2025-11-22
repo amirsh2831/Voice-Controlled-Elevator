@@ -5,14 +5,13 @@ import matplotlib.pyplot as plt
 import csv
 import ast
 
-# === CONFIG ===
-NEW_SAMPLE_PATH = "test_samples/nine/9-12.wav"   
-DATASET_CSV = "dataset.csv"
+NEW_SAMPLE_PATH = "new test/9.wav"   
+DATASET_CSV = "dataset_knn.csv"
 FRAME_SIZE = 1024
 HOP_SIZE = 512
 TARGET_FRAMES = 300  
 
-def resize_frames(data: np.ndarray, target_frames: int) -> np.ndarray:
+def resize(data , target_frames): 
     original_frames, features = data.shape
     resized = np.zeros((target_frames, features))
     scale = (original_frames - 1) / (target_frames - 1)
@@ -28,7 +27,7 @@ def resize_frames(data: np.ndarray, target_frames: int) -> np.ndarray:
     resized[-1] = data[-1]
     return resized
 
-def extract_features(filepath):
+def extract(filepath):
     sample_rate, data = wav.read(filepath)
     if len(data.shape) == 2:
         data = np.mean(data, axis=1)
@@ -49,13 +48,24 @@ def extract_features(filepath):
 
         avg = np.mean(frame)
         energy = np.sum(frame ** 2)
-        signs = np.sign(frame)
-        signs = signs[signs != 0]
+        zcr = 0
 
-        if len(signs) > 1:
-            zcr = np.mean(np.abs(np.diff(signs)))
-        else:
-            zcr = 0
+        for a in range(1, len(frame)):
+         if (frame[a] * frame[a-1] < 0): 
+            zcr += 1
+         elif (frame[a] * frame[a-1] == 0):
+            if (frame[a] * frame[a-2] < 0):
+                zcr += 1
+
+
+
+        # signs = np.sign(frame)
+        # signs = signs[signs != 0]
+
+        # if len(signs) > 1:
+        #     zcr = np.mean(np.abs(np.diff(signs)))
+        # else:
+        #     zcr = 0
 
         features.append([avg, energy, zcr])
 
@@ -72,8 +82,8 @@ with open(DATASET_CSV, 'r') as f:
         combined = np.stack([avg, energy, zcr], axis=1)
         dataset.append((filename, combined))
 
-features = extract_features(NEW_SAMPLE_PATH)
-features_resized = resize_frames(features, TARGET_FRAMES)
+features = extract(NEW_SAMPLE_PATH)
+features_resized = resize(features, TARGET_FRAMES)
 
 distances = []
 for filename, sample_feat in dataset:
@@ -85,7 +95,14 @@ print("\nSimilarity Ranking:")
 for fname, d in distances:
     print(f"{fname:30} Distance: {d:.2f}")
 
-names = [x[0] for x in distances]
-values = [x[1] for x in distances]
+minimums = distances[:3]
+min_labels = [fname.split('-')[0] for fname, _ in minimums]
 
-print("\n",names[0].split(".")[0], values[0])
+from collections import Counter
+label_counts = Counter(min_labels)
+most_common_label, count = label_counts.most_common(1)[0]
+
+if count >= 2:
+    print(f"Predicted Label: {most_common_label}")
+else:
+    print("Prediction: Unknown (no majority)")

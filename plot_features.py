@@ -2,61 +2,44 @@ import numpy as np
 import scipy.io.wavfile as wav
 import matplotlib.pyplot as plt
 
-sample_rate, data = wav.read('sara.wav')
+sample_rate, data = wav.read('traning_Samples/1-2.wav')
 frame_size = 1024
-# num_frames = len(data) // frame_size
 
 averages = []
 energies = []
 zero_crossings = []
 
-
-# stereo to mono
 if len(data.shape) == 2:
     print("data.shape 2")
     data = np.mean(data, axis=1)
 
     emphasized = np.copy(data)
-    # emphasized[0] = data[0]  
     emphasized[1:] = 1.7 * (data[1:] - 0.99 * data[:-1])
 
-# frams 50% overlapp
 num_frames = (len(emphasized) - frame_size) // 512 + 1
 
 for i in range(num_frames):
 
-    # frame = data[i * frame_size : (i + 1) * frame_size]
-    # frame = emphasized[i * frame_size : (i + 1) * frame_size]
-
-    # 50 % overlap---------------
     start = i * 512
     end = start + frame_size
     
     frame = emphasized[start:end]
-    # ---------------
     avg = np.mean(frame)
     energy = np.sum(frame ** 2)
+    zcr = 0
 
-    # --------------------
-    signs = np.sign(frame)
-    notzero = signs != 0
-    zero_filter = signs[notzero]
-
-    if len(zero_filter) > 1:
-        zcr = np.mean(np.abs(np.diff(zero_filter)))
-    else:
-        zcr = 0
-    # --------------------
+    for a in range(1, len(frame)):
+        if (frame[a] * frame[a-1] < 0): 
+            zcr += 1
+        elif (frame[a] * frame[a-1] == 0):
+            if (frame[a] * frame[a-2] < 0):
+                zcr += 1
 
     averages.append(avg)
     energies.append(energy)
     zero_crossings.append(zcr)
 
-
-
 frames = np.arange(num_frames)
-
-
 
 fig, axs = plt.subplots(4, 1, figsize=(12, 10), sharex=False)
 
@@ -84,6 +67,5 @@ axs[3].grid(True)
 
 plt.suptitle('elevator mk II')
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-
 
 plt.show()
